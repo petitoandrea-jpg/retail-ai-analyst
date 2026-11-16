@@ -43,6 +43,8 @@ def init_db() -> RetailGoldDB:
 db = init_db()
 stats_engine = RetailStatisticalAnalyst(db)
 
+has_groq_secret = hasattr(st, "secrets") and bool(st.secrets.get("GROQ_API_KEY", ""))
+
 # Sidebar
 with st.sidebar:
     st.markdown("## 🤖 Configurazione AI Agent")
@@ -57,7 +59,7 @@ with st.sidebar:
             "Groq Cloud API (Llama-3.3-70B)",
             "OpenAI API (GPT-4o-mini)",
         ],
-        index=0,
+        index=1 if has_groq_secret else 0,
     )
 
     api_key = ""
@@ -134,13 +136,13 @@ with tab_chat:
                 "role": "assistant",
                 "content": (
                     "Ciao! Sono il tuo **AI Data Analyst**. Posso interrogare lo Star Schema `retail.db`, "
-                    "eseguire test statistici di significatività (Test $t$ di Welch, ANOVA, $\chi^2$, Outlier Z-score) "
+                    "eseguire test statistici di significatività (Test $t$ di Welch, ANOVA, $\\chi^2$, Outlier Z-score) "
                     "e generare grafici per il management. Clicca su una domanda nella barra laterale o scrivi qui sotto!"
                 ),
             }
         ]
 
-    for msg in st.session_state.chat_history:
+    for msg_idx, msg in enumerate(st.session_state.chat_history):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if "sql_query" in msg:
@@ -148,7 +150,11 @@ with tab_chat:
                     st.code(msg["sql_query"], language="sql")
                     st.dataframe(msg["dataframe"], use_container_width=True)
             if msg.get("figure") is not None:
-                st.plotly_chart(msg["figure"], use_container_width=True)
+                st.plotly_chart(
+                    msg["figure"],
+                    use_container_width=True,
+                    key=f"chat_hist_chart_{msg_idx}",
+                )
 
     user_input = st.chat_input("Fai una domanda sui dati retail (es. 'Nel weekend vendiamo più dei feriali?')...")
     active_question = selected_quick_prompt or user_input
@@ -169,8 +175,13 @@ with tab_chat:
                 st.code(result["sql_query"], language="sql")
                 st.dataframe(result["dataframe"], use_container_width=True)
 
+            new_msg_idx = len(st.session_state.chat_history)
             if result.get("figure") is not None:
-                st.plotly_chart(result["figure"], use_container_width=True)
+                st.plotly_chart(
+                    result["figure"],
+                    use_container_width=True,
+                    key=f"chat_live_chart_{new_msg_idx}",
+                )
 
             st.session_state.chat_history.append(
                 {
@@ -210,7 +221,11 @@ with tab_stats:
         c2.metric("Media Feriale", f"€ {res['metrics']['weekday_mean_eur']:,.2f}", f"σ = € {res['metrics']['weekday_std_eur']:,.2f}")
         c3.metric("Test t di Welch (p-value)", f"{res['metrics']['welch_p_value']:.4f}", f"t = {res['metrics']['welch_t_stat']:.4f}")
         c4.metric("Mann-Whitney U (p-value)", f"{res['metrics']['mann_whitney_p_value']:.4f}", f"d Cohen = {res['metrics']['cohens_d']:.3f}")
-        st.plotly_chart(viz.plot_weekend_vs_weekday_box(res["dataframe"]), use_container_width=True)
+        st.plotly_chart(
+            viz.plot_weekend_vs_weekday_box(res["dataframe"]),
+            use_container_width=True,
+            key="stats_tab_weekend_chart",
+        )
 
     elif stat_choice.startswith("2."):
         res = stats_engine.test_store_anova()
@@ -223,7 +238,11 @@ with tab_stats:
     elif stat_choice.startswith("3."):
         res = stats_engine.detect_daily_anomalies()
         st.info(res["interpretation"])
-        st.plotly_chart(viz.plot_daily_anomalies(res["dataframe"]), use_container_width=True)
+        st.plotly_chart(
+            viz.plot_daily_anomalies(res["dataframe"]),
+            use_container_width=True,
+            key="stats_tab_anomalies_chart",
+        )
         st.markdown("#### Giornate Anomale Identificate (|Z| > 2.5 o Fuori Banda IQR)")
         st.dataframe(res["anomalies_table"], use_container_width=True)
 
@@ -257,8 +276,20 @@ with tab_bi:
 
     row1_col1, row1_col2 = st.columns(2)
     with row1_col1:
-        st.plotly_chart(viz.plot_monthly_revenue(df_monthly), use_container_width=True)
+        st.plotly_chart(
+            viz.plot_monthly_revenue(df_monthly),
+            use_container_width=True,
+            key="bi_tab_monthly_chart",
+        )
     with row1_col2:
-        st.plotly_chart(viz.plot_store_comparison(df_stores), use_container_width=True)
+        st.plotly_chart(
+            viz.plot_store_comparison(df_stores),
+            use_container_width=True,
+            key="bi_tab_store_chart",
+        )
 
-    st.plotly_chart(viz.plot_product_performance(df_products), use_container_width=True)
+    st.plotly_chart(
+        viz.plot_product_performance(df_products),
+        use_container_width=True,
+        key="bi_tab_product_chart",
+    )
